@@ -1,0 +1,199 @@
+---
+title: "**8500: ¿En cuánto tiempo morirían nuestros hijos?**"
+author: "Guillermo Huerta Montado"
+date: "Nov '19"
+output: 
+  html_document:
+    css: styles.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## La desnutrición como causa evitable de mortalidad infantil
+### 
+
+Según estimaciones de la ONG [ACCIÓN CONTRA EL HAMBRE](https://www.accioncontraelhambre.org/es/landing/8500-ninos-mueren-cada-dia-por-desnutricion), **8500 niños menores de 5 años mueren AL DÍA por desnutrición**.
+
+El objetivo de esta publicación es crear un mapa dinámico que muestre cuánto tiempo tardarían en morir todos los niños menores de 5 años en España, en caso de sufrir en nuestro pais esta mortandad. Éste es, obviamente, un ejercicio figurativo, con la única finalidad de facilitar la comprensión por parte de la problación española del alcance de esta tragedia global. Para ello, empleamos una metáfora visual en la que la luz del pais se iría apangando a medida que muriesen los niños.
+
+***
+### La visualización 
+
+**Los aproximadamente 2 millones de niños españoles MORIRÍAN EN MENOS DE 9 MESES:**
+
+![](Animacion_Final.gif)
+
+
+El código y los datos empleados en esta publicación pueden descargarse desde este [enlace](https://github.com/GuilleHM/8500).
+
+***
+### El código
+
+En primer lugar, cargamos las bibliotecas necesarias:
+```{r libraries, results = 'hide', message = FALSE}
+if (!require(pacman)) install.packages("pacman") #Instalamos un gestor de paquetes
+p_load("ggplot2", "ggdark", "gganimate", "dplyr", "tidyr", "magrittr", "gifski", "png") #Cargamos las bibliotecas
+
+# Las bibliotecas que usamos son:
+# ggplot - Generación de gráficos
+# ggdark - Tema oscuro para los gráficos
+# gganimate - Animación de gráficos
+# dplyr y tidyr - Manipulación de datos
+# magrittr - Tuberías (pipes)
+```
+
+
+Comprobamos que la carga se ha realizado con éxito:
+```{r sessioninfo, collapse=TRUE}
+sessionInfo()
+```
+
+
+Descargamos los datos del censo más reciente (2018) del [Instituto Nacional de Estadística (INE)](https://www.ine.es/). El archivo, con extensión *.px*, puede abrirse con el programa libre *PC-Axis* y, desde ahí, exportarse a un archivo *.xlsx*. Convertimos este último a formato *CSV* y nos quedamos con los datos relativos a los niños de 0 a 4 años (inclusive). Éste será el archivo con el que empezaremos a trabajar:
+```{r datosdemograficos}
+datos_0a4 <- read.csv2("Datos/Padron/PadronMunicipalContinuoEspaña1Ene2018_0a4años_INE.csv", stringsAsFactors = FALSE, check.names=FALSE)
+```
+
+
+Igualmente, descargamos desde la web del INE, un archivo (*.mbd*) con los datos de localización de cada municipio y lo exportamos a un archivo *.xlsx*. En este archivo, manipulamos las coordenadas de latitud y logitud para los municipios de las islas canarias (añadiéndole 6 y 4.5 grados, respectivamente), para "acercar" los municipios a la penísnsula y facilitar la representación del mapa. De este archivo exportamos tanto el nombre como las coordenadas de todas las poblaciones a un archivo *CSV*, que será con el que trabajemos:
+```{r datosgeograficos}
+datos_muni <- read.csv2("Datos/BD_Municipios-Entidades/Municipios_LatLon_ICs_Modificadas.csv", dec = ".", stringsAsFactors = FALSE)
+```
+
+
+Observamos una diferencia de 7 localidades entre ambos registros:
+```{r comp_num_nuni, collapse = TRUE}
+cat("Número de municipios según el censo:", nrow(datos_0a4) - 1, "\n") #El primer registro es del total de España
+cat("Número de municipios según el nomenclátor:", nrow(datos_muni))
+```
+
+
+Extraemos el número total de niños de 0 a 4 años en España (alrededor de **2 millones**):
+```{r Num_Total_Niños, collapse = TRUE}
+Num_Total_0a4 <- datos_0a4$NumNi_0a4[1]
+cat("Número total de niños de 0 a 4 años en España:", Num_Total_0a4)
+datos_0a4 <- datos_0a4[-1,] #Eliminamos el registro de la tabla
+```
+
+
+Unimos la tabla del censo con la de los municipios por localidad:
+```{r tabla_datos_final}
+datos_final <- merge(datos_0a4, datos_muni, by.x="Localidad")
+```
+
+
+Al unir la tablas, observamos una pérdida de datos de alrededor del 7% (algunas localidades no están representadas en alguna de las dos tablas):
+```{r pérdida_datos, collapse = TRUE}
+(Num_Total_0a4 - sum(datos_final$NumNi_0a4)) / sum(datos_final$NumNi_0a4) * 100
+```
+
+
+Para compensar dicha pérdida, aumentaremos en ese porcentaje el número de niños para cada población. Resaltar aquí, que nos permitimos realizar este ajuste puesto que el objetivo de esta publicación es meramente ilustrativo y no es imprescindible discernir exactamente a qué población pertenecen los niños:
+```{r inclusión_datos, collapse = TRUE}
+datos_final$NumNi_0a4 <- as.integer(datos_final$NumNi_0a4 * 1.074)
+Num_Total_0a4 <- sum(datos_final$NumNi_0a4)
+cat("Número total de niños de 0 a 4 años en España:", Num_Total_0a4)
+```
+
+
+Calculamos en cuánto tiempo morirían todos los niños (**menos de 9 meses**):
+```{r Num_dias, collapse = TRUE}
+Num_dias <- Num_Total_0a4 / 8500
+cat("La totalidad de niños morirían en menos de", ceiling(Num_dias / 30.5), "meses.")
+```
+
+
+Creamos una columna con el peso específico de cada municipio:
+```{r Proporcion}
+datos_final$prop <- datos_final$NumNi_0a4 / sum(datos_final$NumNi_0a4)
+```
+
+
+Iteramos sobre la tabla y creamos una nueva columna para cada mes (12) con el numero de niños que quedarían vivos ese mes:
+```{r Inclusion_dias}
+i <- 0
+while (i < 12) {
+  datos_final[,i+6] <- ifelse(datos_final[,2] - i*(ceiling(datos_final[,5]*8500*30.5)) > 0, datos_final[,2] - i*ceiling((datos_final[,5]*8500*30.5)), 0)
+  i<- i + 1
+}
+```
+
+
+Eliminamos la columna "prop" que ya no necesitamos:
+```{r Eliminamos_proporcion}
+datos_final$prop <- NULL
+```
+
+
+Cambiamos el nombre de las columnas:
+```{r Nombre_columnas}
+colnames(datos_final)<- c("Localidad", "NumNi_0a4", "Longitud", "Latitud", seq(1, 12, 1))
+```
+
+
+Agrupamos el número de niños vivos para cada mes:
+```{r AgrupamientoPorMes}
+datos_final <- datos_final %>%
+  gather(key="Mes", value = "Vivos", "1":"12")
+datos_final$Mes <- as.integer(datos_final$Mes)
+```
+
+
+Creamos una nueva columna (Ent), que representa al contenedor dentro del cual se encuentra el número de niños vivos en cada momento en cada población. Esta categorización es necesaria para optimizar la visualización, dada la gran variabilidad existente de niños vivos (desde los 150.000 niños inciales en Madrid capital, hasta 0 niños en determinadas poblaciones). La división de los contenedores se elige para que case bien con la división en la que distribuimos el tamaño y la transparencia de los puntos en la visualización:
+```{r Categorizacion}
+datos_final$Bin <- cut(datos_final$Vivos, c(0,10,100,200,500,1000,2000,5000,10000,15000,200000), include.lowest=TRUE)
+datos_final$Ent <- as.integer(as.factor(datos_final$Bin))
+```
+
+
+Pasamos a escala logaritmica el numero de niños vivos y normalizamos el resultado. Usamos estas dos columnas para el tamaño y la transparencia de los puntos de la visualización, respectivamente:
+```{r Normalización}
+datos_final$Vivos <- ifelse(datos_final$Vivos > 0, round(log(datos_final$Vivos),1), 0)
+datos_final$Norm <- datos_final$Vivos / max(datos_final$Vivos)
+```
+
+
+Modificamos los valores de transparencia de los puntos para facilitar una transición mas suave entre los distintos meses. Esta parametrización es el resultado de varias iteraciones (ajustando también los valores de tamaño y transparencia de los puntos):
+```{r TransicionVisual}
+datos_final[(datos_final$Mes == 9 & datos_final$Ent <= 4), 9] <- 0
+datos_final[(datos_final$Mes == 8 & datos_final$Ent <= 3), 9] <- 0
+datos_final[(datos_final$Mes == 7 & datos_final$Ent <= 3), 9] <- 0
+datos_final[(datos_final$Mes == 6 & datos_final$Ent <= 2), 9] <- 0
+datos_final[(datos_final$Mes == 5 & datos_final$Ent <= 2), 9] <- 0
+datos_final[(datos_final$Mes == 4 & datos_final$Ent <= 1), 9] <- 0
+```
+
+
+
+Finalmente, creamos el mapa animado y lo guardamos en un archivo:
+```{r Mapa, warning=FALSE, message=FALSE, results='hide'}
+anim <- ggplot(datos_final) +
+  geom_point(mapping = aes(x = Longitud, y = Latitud, size = Vivos, alpha = Norm), shape = 16, show.legend = FALSE, color = "orange") +
+  dark_theme_void(base_size = 30, base_family = "times") +
+  #Separadores Islas Canarias
+  geom_segment(aes(x = -8.3, y = 35.5, xend = -8.3, yend = 37.5), size = 1.5, color = "#3b3838") +
+  geom_segment(aes(x = -13.9, y = 37.5, xend = -8.28, yend = 37.5), size = 1.5, color = "#3b3838") +
+  scale_size_continuous(range = c(-1, 2), breaks = seq(0, 11, 1)) +
+  scale_alpha(range = c(0, 1), breaks = seq(0, 1, 0.1)) +
+  labs(title = '  Mes: {frame_time} - Niños Vivos: {ifelse((Num_Total_0a4 - floor((frame_time - 1) * 8500 *30.5)) > 0, Num_Total_0a4 - floor((frame_time - 1) * 8500 *30.5), 0)}') +
+  transition_time(Mes) +
+  exit_fade() +
+  ease_aes('linear')
+
+animate(anim, height = 1280, width = 2048, fps = 5)
+anim_save("Animacion_Final.gif")
+```
+
+
+***
+## Si este código te ha sido útil de algún modo, por favor, considera el realizar una donación para contribuir a paliar esta lacra. ¡GRACIAS!
+###
+
+
+**NOTA:** El autor de esta publicación la ha realizado de buena fe, con fines divulgativos, y no tiene ningún tipo de relación comercial o laboral con la ONG [ACCIÓN CONTRA EL HAMBRE](https://www.accioncontraelhambre.org/es/).
+
+
+
